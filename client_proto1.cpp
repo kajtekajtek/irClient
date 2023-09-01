@@ -34,6 +34,22 @@ void *get_in_addr(SA *sa)
 	return &((reinterpret_cast<SA_in6*>(sa))->sin6_addr);
 }
 
+void connection_closed(const int& connection) 
+{
+	if (connection == 0) {
+		std::cout << "Connection closed by the server\n";
+	} else if (connection == -1) {
+		switch (errno) {
+		case ECONNRESET:
+			std::cout << "Connection reset by the server\n";
+		case ETIMEDOUT:
+			std::cout << "Connection time out\n";
+		default:
+			std::cout << "Connection error\n";
+		}
+	}
+}
+
 int main(int argc, char *argv[])
 try {
 	// socket, actual size of recieved data
@@ -90,8 +106,11 @@ try {
 	// all done with server_info struct; free memory
 	freeaddrinfo(server_info);
 	
+	// buffer & connection state variable for connection state checking
+	char buffer;
+	int connection = 1;
 	// main loop
-	while (true) {
+	while (connection > 0) {
 		// if any data recieved
 		if ((msgsize = recv(sockfd, msgbuffer, MAXMSGLEN, 0)) > 0) {
 			// print the message
@@ -99,7 +118,13 @@ try {
 			// empty the message buffer
 			memset(msgbuffer, 0, sizeof(msgbuffer));
 		}
+
+		connection = recv(sockfd, &buffer, 1, MSG_PEEK);
 	}
+
+	connection_closed(connection);	
+	close(sockfd);
+
 } catch (std::runtime_error& e) {
-	std::cout << e.what();
+	std::cerr << e.what();
 }
