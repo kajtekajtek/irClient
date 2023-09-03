@@ -34,6 +34,14 @@ void *get_in_addr(SA *sa)
 	return &((reinterpret_cast<SA_in6*>(sa))->sin6_addr);
 }
 
+void get_user_input(char *buf)
+{
+	std::string data;
+	std::getline(std::cin, data);
+	if (data.size() <= MAXMSGLEN)
+		strcpy(buf,data.c_str());
+}
+
 void connection_closed(const int& connection) 
 {
 	if (connection == 0) {
@@ -110,16 +118,19 @@ try {
 	char buffer;
 	int connection = 1;
 	// main loop
-	while (connection > 0) {
+	while ((connection = recv(sockfd, &buffer, 1, MSG_PEEK)) > 0) {
+		// send data from input
+		memset(cmmndbuffer,0,MAXMSGLEN);
+		get_user_input(cmmndbuffer);
+		if ((send(sockfd, cmmndbuffer, MAXMSGLEN, 0)) <= 0)
+			std::cout << "Message not sent\n";
 		// if any data recieved
 		if ((msgsize = recv(sockfd, msgbuffer, MAXMSGLEN, 0)) > 0) {
 			// print the message
 			std::cout << msgbuffer;
 			// empty the message buffer
-			memset(msgbuffer, 0, sizeof(msgbuffer));
+			memset(msgbuffer, 0, MAXMSGLEN);
 		}
-
-		connection = recv(sockfd, &buffer, 1, MSG_PEEK);
 	}
 
 	connection_closed(connection);	
