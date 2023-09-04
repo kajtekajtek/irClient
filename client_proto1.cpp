@@ -6,9 +6,12 @@
  */
 #include <iostream>  // cin; cout
 #include <string>    // std::string
-#include <stdexcept> // std::runtime_error()
+#include <stdexcept> // throwing exceptions
 #include <string.h>  // memset()
-#include <unistd.h>   // close()
+#include <unistd.h>  // close()
+// multithreading
+#include <mutex>
+#include <thread>
 // socket & networking headers
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -25,8 +28,11 @@ using SA_in = struct sockaddr_in;
 using SA_in6 = struct sockaddr_in6;
 using AI = struct addrinfo;
 
+// mutex to synchronize access to shared data
+std::mutex mtx;
+
 // convert sockaddr to sockaddr_in or sockaddr_in6 (IPv4 or IPv6)
-void *get_in_addr(SA *sa)
+void *getInAddr(SA *sa)
 {
 	if (sa->sa_family == AF_INET)
 		return &((reinterpret_cast<SA_in*>(sa))->sin_addr);
@@ -34,15 +40,73 @@ void *get_in_addr(SA *sa)
 	return &((reinterpret_cast<SA_in6*>(sa))->sin6_addr);
 }
 
-void get_user_input(char *buf)
+// get server information and try to establish successfull connection
+void connectToServer(int& sockfd, char *host, AI hints)
 {
-	std::string data;
-	std::getline(std::cin, data);
-	if (data.size() <= MAXMSGLEN)
-		strcpy(buf,data.c_str());
+	// address info structs
+	AI *server_info, *iter;
+	// ip address string
+	char ipstr[INET6_ADDRSTRLEN];
+
+	// get address information of chosen server
+	int rv = getaddrinfo(host, PORT_PLAIN, &hints, &server_info);
+
+	if (rv != 0) {
+		throw std::runtime_error("error: couldn't get addrinfo\n");
+	}
+
+	// try each address from results until successfull connection
+	for (iter = server_info; iter != nullptr; iter = iter->ai_next) {
+		// create socket file descriptor
+		if ((sockfd = socket(iter->ai_family, iter->ai_socktype,
+			iter->ai_protocol)) == -1) {
+			continue;
+		}	
+		// connect socket file descriptor
+		if (connect(sockfd, iter->ai_addr, iter->ai_addrlen) == -1) {
+			close(sockfd);
+			continue;
+		}
+		break;
+	}
+
+	if(!iter) {
+		throw std::runtime_error("client: failed to connect\n");
+	}
+
+	// translate ip address from bytes to readable representation
+	inet_ntop(iter->ai_family,
+		getInAddr(reinterpret_cast<SA*>(iter->ai_addr)),
+		ipstr, INET6_ADDRSTRLEN);
+
+	std::cout << "client: connecting to " << ipstr << '\n';
+
+	// no longer needed
+	freeaddrinfo(server_info);	
 }
 
-void connection_closed(const int& connection) 
+// get input from the user, prepare it and send to the peer
+void handleUserInput(int socket)
+{
+	// clear character input stream
+	std::cin >> std::ws;
+	// get line of characters from user
+	std::string data;
+	std::getline(std::cin, data);
+	// truncate data string to MAXMSGLEN - 2 characters
+	if (data.size() > MAXMSGLEN - 2)
+		data.erase(MAXMSGLEN - 2, std::string::npos);
+	// "IRC messages are always lines of characters terminated with
+	// CR-LF (Carriage Return - Line Feed) pair"
+	data.push_back(0x0D);
+	data.push_back(0x0A);	
+	// send data
+	if ((send(socket, data.c_str(), data.size(), 0)) < 0)
+		std::cout << "Send error\n";
+}
+
+// closed connection message
+void connectionClosed(const int& connection) 
 {
 	if (connection == 0) {
 		std::cout << "Connection closed by the server\n";
@@ -58,82 +122,62 @@ void connection_closed(const int& connection)
 	}
 }
 
+// handle incoming data
+void recieveAndDisplay(int socket)
+{
+	int connection_state = 1; 
+	char state_buffer[1];
+	// while connection is up
+	while (true) {
+		// recieve data, feed it into a buffer and display it as string
+		int bytes_recieved;
+		char buffer[MAXMSGLEN];
+		if ((bytes_recieved = recv(socket, buffer, MAXMSGLEN, 0)) > 0) {
+			// mutex used to protect the cout stream
+			std::lock_guard<std::mutex> lock(mtx);
+
+			std::cout << std::string(buffer, bytes_recieved);
+		} else {
+			connectionClosed(bytes_recieved);
+			break;
+		}
+	}
+	return;
+}
+
+
+
 int main(int argc, char *argv[])
 try {
-	// socket, actual size of recieved data
-	int sockfd, msgsize;
-	// message (server-to-client) & command (client-to-server) buffers
-	char msgbuffer[MAXMSGLEN], cmmndbuffer[MAXMSGLEN];
-	// ip address string
-	char ipstr[INET6_ADDRSTRLEN];
-
-	AI hints, *server_info, *iter;
+	// socket
+	int sockfd;
+	// server host name string
+	char *host_name = argv[1];
+	// address info struct for connection options
+	AI hints;
 
 	if (argc != 2) {
-		throw std::runtime_error("usage: client hostname/n");
+		throw std::runtime_error("usage: client hostname\n");
 	}
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;		// unspecified IP version
 	hints.ai_socktype = SOCK_STREAM; 	// TCP
 	
-	// get address information of chosen server
-	int rv;
-	if ((rv = getaddrinfo(argv[1], PORT_PLAIN,
-		&hints, &server_info)) != 0) {
-		throw std::runtime_error("error: couldn't get addrinfo");
+	// get server information and connect the socket
+	connectToServer(sockfd, host_name, hints);
+		
+	// create a separate thread for recieving and displaying data
+	std::thread recieve_thread(recieveAndDisplay, sockfd);
+
+	// main loop for user input
+	while (true) {
+		handleUserInput(sockfd);
 	}
 
-	// try each address from results until successfull connection
-	for (iter = server_info; iter != nullptr; iter = iter->ai_next) {
-		// create socket file descriptor
-		if ((sockfd = socket(iter->ai_family, iter->ai_socktype,
-			iter->ai_protocol)) == -1) {
-			continue;
-		}	
-		// connect socket file descriptor
-		if (connect(sockfd, iter->ai_addr, iter->ai_addrlen) == -1) {
-			close(sockfd);
-			continue;
-		}
+	// join separate thread
+	recieve_thread.join();
 
-		break;
-	}
-
-	if(!iter) {
-		throw std::runtime_error("client: failed to connect\n");
-	}
-
-	// translate ip address from bytes to readable representation
-	inet_ntop(iter->ai_family,
-		get_in_addr(reinterpret_cast<SA*>(iter->ai_addr)),
-		ipstr, INET6_ADDRSTRLEN);
-
-	std::cout << "client: connecting to " + std::string(ipstr) + '\n';
-
-	// all done with server_info struct; free memory
-	freeaddrinfo(server_info);
-	
-	// buffer & connection state variable for connection state checking
-	char buffer;
-	int connection = 1;
-	// main loop
-	while ((connection = recv(sockfd, &buffer, 1, MSG_PEEK)) > 0) {
-		// send data from input
-		memset(cmmndbuffer,0,MAXMSGLEN);
-		get_user_input(cmmndbuffer);
-		if ((send(sockfd, cmmndbuffer, MAXMSGLEN, 0)) <= 0)
-			std::cout << "Message not sent\n";
-		// if any data recieved
-		if ((msgsize = recv(sockfd, msgbuffer, MAXMSGLEN, 0)) > 0) {
-			// print the message
-			std::cout << msgbuffer;
-			// empty the message buffer
-			memset(msgbuffer, 0, MAXMSGLEN);
-		}
-	}
-
-	connection_closed(connection);	
 	close(sockfd);
 
 } catch (std::runtime_error& e) {
