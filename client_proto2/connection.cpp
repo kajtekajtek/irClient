@@ -1,54 +1,16 @@
-#include "client.h"
+// Connection class definitions
+// Dependencies:
+#include "connection.h"
 
-// convert sockaddr to sockaddr_in or sockaddr_in6 (IPv4 or IPv6)
-void *Client::getInAddr(SA *sa)
-{
-	if (sa->sa_family == AF_INET)
-		return &((reinterpret_cast<SA_in*>(sa))->sin_addr);
-
-	return &((reinterpret_cast<SA_in6*>(sa))->sin6_addr);
-}
-
-// closed connection message
-void Client::connectionClosed(int connection) 
-{
-	if (connection == 0) {
-		std::cout << "Connection closed by the server\n";
-	} else if (connection == -1) {
-		switch (errno) {
-		case ECONNRESET:
-			std::cout << "Connection reset by the server\n";
-		case ETIMEDOUT:
-			std::cout << "Connection time out\n";
-		default:
-			std::cout << "Connection error\n";
-		}
-	}
-}
-
-void Client::getUserInput(std::string& message)
-{
-	// clear character input stream
-	std::cin >> std::ws;
-	// get line of characters from user
-	std::getline(std::cin, message);
-}
-
-/* Command: PRIVMSG
-   Parameters: <target>{,<target>} <text to be sent> */
-void Client::prepareMessage(std::string data)
-{
-	//
-}
-
-Client::Connection::Connection()
+Connection::Connection()
+:nickname { NICKNAME }, username { USERNAME }, realname {REALNAME}
 {
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;		// unspecified IP version
 	hints.ai_socktype = SOCK_STREAM; 	// TCP
 }
 
-void Client::Connection::connectToServer(char *hstnm)
+void Connection::connectToServer(char *hstnm)
 {
 	// address info structs
 	AI *server_info, *iter;
@@ -86,7 +48,7 @@ void Client::Connection::connectToServer(char *hstnm)
 
 	// translate ip address from bytes to readable representation
 	inet_ntop(iter->ai_family,
-		getInAddr(reinterpret_cast<SA*>(iter->ai_addr)),
+		Client::getInAddr(reinterpret_cast<SA*>(iter->ai_addr)),
 		ipstr, INET6_ADDRSTRLEN);
 
 	std::cout << "client: connecting to " << ipstr << '\n';
@@ -96,14 +58,14 @@ void Client::Connection::connectToServer(char *hstnm)
 }
 
 // send data
-void Client::Connection::sendData(const char *data, int data_size)
+void Connection::sendData(const char *data, int data_size)
 {
 	if ((send(sockfd, data, data_size, 0)) < 0)
 		std::cout << "Send error\n";
 }
 
 // recieve data
-void Client::Connection::recieveData(std::mutex *mtx)
+void Connection::recieveData(std::mutex *mtx)
 {
 	int connection_state = 1; 
 	char state_buffer[1];
@@ -118,10 +80,43 @@ void Client::Connection::recieveData(std::mutex *mtx)
 
 			std::cout << std::string(buffer, bytes_recieved);
 		} else {
-			connectionClosed(bytes_recieved);
+			Client::connectionClosed(bytes_recieved);
 			break;
 		}
 	}
 	return;
 
+}
+
+void Connection::registerConnection()
+{
+	std::string cmd;
+
+	// CAP LS 302
+	cmd = Client::command(Command::CAP, {"LS", "302"});
+	sendData(cmd.c_str(), cmd.size());
+
+	// NICK <nickname>
+	cmd = Client::command(Command::NICK, {nickname});
+	sendData(cmd.c_str(), cmd.size());
+
+	// USER <username> 0 * <realname>
+	cmd = Client::command(Command::USER, {username, realname});
+	sendData(cmd.c_str(), cmd.size());
+
+	// CAP END
+	cmd = Client::command(Command::CAP, {"END"});
+	sendData(cmd.c_str(), cmd.size());
+}
+
+void Connection::joinChannel(char *chnnl)
+{
+	std::string cmd;
+
+	channel = "#";
+	channel += chnnl;
+
+	// JOIN <channel>
+	cmd = Client::command(Command::JOIN, {channel});
+	sendData(cmd.c_str(), cmd.size());
 }

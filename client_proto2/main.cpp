@@ -6,25 +6,28 @@
  * - print recieved messages
  * - encode and decode commands and messages
  */
-#include "client.h"
+#include "connection.h"
 
 // mutex to synchronize access to shared data
 std::mutex mtx;
 
 int main(int argc, char *argv[])
 try {
-	if (argc != 2) {
-		throw std::runtime_error("usage: client hostname\n");
+	if (argc != 3) {
+		throw std::runtime_error("usage: irClient hostname channel\n");
 	}
 
-	Client::Connection connection;
+	Connection connection;
 
-	// connect to host name specified
 	connection.connectToServer(argv[1]);
 
 	// create a separate thread for recieving and displaying data
-	std::thread recieve_thread(&Client::Connection::recieveData,
+	std::thread recieve_thread(&Connection::recieveData,
 			&connection, &mtx);
+
+	connection.registerConnection();
+
+	connection.joinChannel(argv[2]);
 
 	// main loop for user input
 	std::string message;
@@ -32,7 +35,6 @@ try {
 		Client::getUserInput(message);
 
 		// prepare IRC compatible message command
-		Client::prepareMessage(message);
 
 		connection.sendData(message.c_str(), message.size());
 
