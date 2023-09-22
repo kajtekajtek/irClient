@@ -19,14 +19,17 @@ try {
 
 	Connection connection;
 
+	// join the server specified in first argument
 	connection.connectToServer(argv[1]);
 
 	// create a separate thread for recieving and displaying data
 	std::thread recieve_thread(&Connection::recieveData,
 			&connection, &mtx);
 
+	// IRC client-server connection registration sequence
 	connection.registerConnection();
 
+	// join the channel specified in second argument
 	connection.joinChannel(argv[2]);
 
 	// main loop for user input
@@ -35,6 +38,8 @@ try {
 		Client::getUserInput(message);
 
 		// prepare IRC compatible message command
+		message = Client::command(Command::PRIVMSG,
+				{connection.channelName(), message});
 
 		connection.sendData(message.c_str(), message.size());
 

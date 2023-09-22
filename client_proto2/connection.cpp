@@ -3,7 +3,7 @@
 #include "connection.h"
 
 Connection::Connection()
-:nickname { NICKNAME }, username { USERNAME }, realname {REALNAME}
+:nickname { NICKNAME }, username { USERNAME }, realname { REALNAME }
 {
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;		// unspecified IP version
