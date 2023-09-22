@@ -16,6 +16,8 @@ class Connection {
 		void sendData(const char *data, int data_size);
 		// recieve data
 		void recieveData(std::mutex *mtx);
+
+		const std::string& channelName() { return channel; }
 	private:
 		// socket file descriptor
 		int sockfd = 0;

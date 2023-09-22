@@ -74,7 +74,13 @@ std::string Client::command(Command cmd, std::vector<std::string> params)
 			cmd_rtrnd = "JOIN " + params[0];
 		break;
 	// PRIVMSG <target>{,<target>} <text to be sent>
+	// Parameter 1 = target
+	// Parameter 2 = text to be sent
 	case Command::PRIVMSG:
+		if (params.size() != 2)
+			throw std::runtime_error("Error: PRIVMSG command parameters\n");
+		else
+			cmd_rtrnd = "PRIVMSG " + params[0] + " :" + params[1];
 		break;
 	}
 
